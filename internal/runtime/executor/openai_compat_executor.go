@@ -1160,6 +1160,8 @@ type statusErr struct {
 	transientRateLimit bool
 	// diagnostic is a content-free detail for logs only; it never reaches clients.
 	diagnostic string
+	// headers are the allowlisted upstream retry metadata.
+	headers http.Header
 }
 
 func (e statusErr) Error() string {
@@ -1171,6 +1173,7 @@ func (e statusErr) Error() string {
 func (e statusErr) StatusCode() int            { return e.code }
 func (e statusErr) RetryAfter() *time.Duration { return e.retryAfter }
 func (e statusErr) IsCredentialScoped() bool   { return e.credentialScoped }
+func (e statusErr) Headers() http.Header       { return e.headers }
 
 // LogDiagnostic lets upstream failure logs explain a sanitized client message.
 func (e statusErr) LogDiagnostic() string { return e.diagnostic }
