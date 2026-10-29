@@ -35,6 +35,61 @@ func (e directResponseTestError) StatusCode() int      { return e.status }
 func (e directResponseTestError) DirectResponse() bool { return e.direct }
 func (e directResponseTestError) ResponseBody() []byte { return e.body }
 
+type rateLimitHeaderTestError struct {
+	directResponseTestError
+	headers http.Header
+}
+
+func (e rateLimitHeaderTestError) Headers() http.Header { return e.headers }
+
+func TestExecutionErrorMessagePreservesSafeRateLimitHeaders(t *testing.T) {
+	for _, direct := range []bool{false, true} {
+		t.Run(fmt.Sprintf("direct=%t", direct), func(t *testing.T) {
+			headers := http.Header{
+				"Anthropic-Ratelimit-Unified-Status":               {"rejected"},
+				"Anthropic-Ratelimit-Unified-Reset":                {"1900000000"},
+				"Anthropic-Ratelimit-Unified-Representative-Claim": {"five_hour"},
+				"Anthropic-Ratelimit-Unified-5h-Status":            {"rejected"},
+				"Anthropic-Ratelimit-Unified-5h-Reset":             {"1900000000"},
+				"Anthropic-Ratelimit-Unified-7d-Status":            {"rejected"},
+				"Anthropic-Ratelimit-Unified-7d-Reset":             {"1900003600"},
+				"Anthropic-Ratelimit-Requests-Remaining":           {"0"},
+				"Retry-After":                                      {"30"},
+				"Cookie":                                           {"synthetic-cookie"},
+				"Set-Cookie":                                       {"synthetic-cookie"},
+				"Authorization":                                    {"synthetic-authorization"},
+				"Proxy-Authorization":                              {"synthetic-authorization"},
+				"X-Api-Key":                                        {"synthetic-api-key"},
+			}
+			upstream := rateLimitHeaderTestError{
+				directResponseTestError: directResponseTestError{status: 429, direct: direct, body: []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"synthetic limit"}}`)},
+				headers:                 headers,
+			}
+			msg := executionErrorMessage(fmt.Errorf("upstream: %w", upstream))
+			gin.SetMode(gin.TestMode)
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			NewBaseAPIHandlers(&sdkconfig.SDKConfig{PassthroughHeaders: true}, nil).WriteErrorResponse(c, msg)
+			if recorder.Code != http.StatusTooManyRequests {
+				t.Fatalf("status = %d", recorder.Code)
+			}
+			for name, values := range headers {
+				if strings.HasPrefix(name, "Anthropic-Ratelimit-") || name == "Retry-After" {
+					if got := recorder.Header().Get(name); got != values[0] {
+						t.Errorf("missing rate-limit header %s", name)
+					}
+				} else if recorder.Header().Get(name) != "" {
+					t.Errorf("forwarded forbidden header %s", name)
+				}
+			}
+			if direct && !bytes.Equal(recorder.Body.Bytes(), upstream.body) {
+				t.Error("direct response body changed")
+			}
+		})
+	}
+}
+
 type responseBodyOnlyTestError struct {
 	status int
 	body   []byte

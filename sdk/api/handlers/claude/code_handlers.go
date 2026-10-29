@@ -24,6 +24,7 @@ import (
 	. "github.com/router-for-me/CLIProxyAPI/v8/internal/constant"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/interfaces"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
@@ -597,8 +598,17 @@ func (h *ClaudeCodeAPIHandler) WriteErrorResponse(c *gin.Context, msg *interface
 			c.Writer.Header().Add("Retry-After", value)
 		}
 	}
-	if msg != nil && msg.Addon != nil && handlers.PassthroughHeadersEnabled(h.CurrentConfig()) {
-		for key, values := range msg.Addon {
+	if msg != nil && msg.Addon != nil {
+		addon := msg.Addon
+		if !handlers.PassthroughHeadersEnabled(h.CurrentConfig()) {
+			addon = nil
+			if status == http.StatusTooManyRequests {
+				// Rate-limit metadata is safe and needed for client recovery even
+				// when generic upstream header passthrough is disabled.
+				addon = helps.ClaudeRetryHeaders(msg.Addon)
+			}
+		}
+		for key, values := range addon {
 			if len(values) == 0 || handlers.IsCPAReservedResponseHeader(key) {
 				continue
 			}

@@ -23,13 +23,13 @@ const (
 )
 
 // ClaudeRetryHeaders returns the upstream headers that tell a client when it may
-// retry: Retry-After, Retry-After-Ms and the Anthropic-Ratelimit-Unified-* family.
+// retry: Retry-After and the Anthropic-Ratelimit-* family.
 // It returns nil when none are present.
 func ClaudeRetryHeaders(headers http.Header) http.Header {
 	var retry http.Header
 	for key, values := range headers {
 		name := http.CanonicalHeaderKey(key)
-		if name != "Retry-After" && name != "Retry-After-Ms" && !strings.HasPrefix(name, "Anthropic-Ratelimit-Unified-") {
+		if name != "Retry-After" && !strings.HasPrefix(name, "Anthropic-Ratelimit-") {
 			continue
 		}
 		if retry == nil {

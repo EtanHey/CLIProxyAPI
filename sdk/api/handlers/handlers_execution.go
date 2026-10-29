@@ -384,12 +384,19 @@ func executionErrorMessage(err error) *interfaces.ErrorMessage {
 	if errors.As(err, &direct) && direct != nil && direct.DirectResponse() {
 		body := direct.ResponseBody()
 		var headers http.Header
+		var carrier interface{ Headers() http.Header }
+		if errors.As(err, &carrier) && carrier != nil {
+			headers = helps.ClaudeRetryHeaders(carrier.Headers())
+		}
 		if len(body) > 0 {
 			contentType := http.DetectContentType(body)
 			if json.Valid(body) {
 				contentType = "application/json"
 			}
-			headers = http.Header{"Content-Type": []string{contentType}}
+			if headers == nil {
+				headers = make(http.Header)
+			}
+			headers.Set("Content-Type", contentType)
 		}
 		return &interfaces.ErrorMessage{
 			StatusCode:     status,

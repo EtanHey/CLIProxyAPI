@@ -19,6 +19,28 @@ import (
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
 )
 
+func TestClaudeFastDirectResponseRateHeaderAllowlist(t *testing.T) {
+	want := http.Header{
+		"Content-Type":                                     {"application/json"},
+		"Anthropic-Ratelimit-Unified-Reset":                {"1900000000"},
+		"Anthropic-Ratelimit-Unified-Status":               {"rejected"},
+		"Anthropic-Ratelimit-Unified-Representative-Claim": {"five_hour"},
+		"Retry-After":                                      {"30"},
+	}
+	headers := want.Clone()
+	for _, name := range []string{"Cookie", "Set-Cookie", "Authorization", "Proxy-Authorization", "X-Api-Key", "X-Unrelated", "Retry-After-Ms"} {
+		headers.Set(name, "synthetic")
+	}
+	err := newClaudeFastDirectResponseError(&http.Response{StatusCode: 429, Header: headers}, []byte(`{"type":"error"}`))
+	var direct *cliproxyexecutor.RequestTerminatedError
+	if !errors.As(err, &direct) {
+		t.Fatal("expected direct response")
+	}
+	if !reflect.DeepEqual(direct.ResponseHeaders(), want) {
+		t.Fatal("direct response headers do not match the allowlist")
+	}
+}
+
 func TestClaudeExecutorFastHTTPErrorPassesThroughWithoutRetry(t *testing.T) {
 	testCases := []struct {
 		name       string

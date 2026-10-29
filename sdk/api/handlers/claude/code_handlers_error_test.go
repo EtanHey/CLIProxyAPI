@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -307,6 +308,81 @@ func TestPendingClaudeStreamErrorUsesBufferedError(t *testing.T) {
 
 type preFTKeepAliveClaudeExecutor struct {
 	chunks chan coreexecutor.StreamChunk
+}
+
+type headerRejectionExecutor struct {
+	preFTKeepAliveClaudeExecutor
+	err error
+}
+
+func (e *headerRejectionExecutor) Execute(context.Context, *coreauth.Auth, coreexecutor.Request, coreexecutor.Options) (coreexecutor.Response, error) {
+	return coreexecutor.Response{}, e.err
+}
+
+func (e *headerRejectionExecutor) ExecuteStream(context.Context, *coreauth.Auth, coreexecutor.Request, coreexecutor.Options) (*coreexecutor.StreamResult, error) {
+	return nil, e.err
+}
+
+type headerRejectionError struct{ direct bool }
+
+func (e headerRejectionError) Error() string        { return "synthetic rate limit" }
+func (e headerRejectionError) StatusCode() int      { return http.StatusTooManyRequests }
+func (e headerRejectionError) DirectResponse() bool { return e.direct }
+func (e headerRejectionError) ResponseBody() []byte {
+	return []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"synthetic limit"}}`)
+}
+func (e headerRejectionError) Headers() http.Header {
+	return http.Header{
+		"Anthropic-Ratelimit-Unified-Status":               {"rejected"},
+		"Anthropic-Ratelimit-Unified-Reset":                {"1900000000"},
+		"Anthropic-Ratelimit-Unified-Representative-Claim": {"five_hour"},
+		"Retry-After":   {"30"},
+		"Cookie":        {"synthetic"},
+		"Set-Cookie":    {"synthetic"},
+		"Authorization": {"synthetic"},
+		"X-Api-Key":     {"synthetic"},
+	}
+}
+
+func TestClaudeMessagesRejectionKeepsRateLimitHeaders(t *testing.T) {
+	for _, direct := range []bool{false, true} {
+		for _, stream := range []bool{false, true} {
+			for _, passthrough := range []bool{false, true} {
+				t.Run(fmt.Sprintf("direct=%t/stream=%t/passthrough=%t", direct, stream, passthrough), func(t *testing.T) {
+					gin.SetMode(gin.TestMode)
+					executor := &headerRejectionExecutor{err: headerRejectionError{direct: direct}}
+					manager := coreauth.NewManager(nil, nil, nil)
+					manager.RegisterExecutor(executor)
+					model := "synthetic-rejection-model"
+					auth := &coreauth.Auth{ID: "synthetic-rejection-auth", Provider: executor.Identifier(), Status: coreauth.StatusActive}
+					if _, errRegister := manager.Register(context.Background(), auth); errRegister != nil {
+						t.Fatal(errRegister)
+					}
+					registry.GetGlobalRegistry().RegisterClient(auth.ID, auth.Provider, []*registry.ModelInfo{{ID: model}})
+					t.Cleanup(func() { registry.GetGlobalRegistry().UnregisterClient(auth.ID) })
+					h := NewClaudeCodeAPIHandler(handlers.NewBaseAPIHandlers(&sdkconfig.SDKConfig{PassthroughHeaders: passthrough}, manager))
+					router := gin.New()
+					router.POST("/v1/messages", h.ClaudeMessages)
+					request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(fmt.Sprintf(`{"model":%q,"max_tokens":1,"messages":[{"role":"user","content":"fixture"}],"stream":%t}`, model, stream)))
+					request.Header.Set("Content-Type", "application/json")
+					recorder := httptest.NewRecorder()
+					router.ServeHTTP(recorder, request)
+					if recorder.Code != http.StatusTooManyRequests {
+						t.Fatalf("status = %d, want 429", recorder.Code)
+					}
+					for name, values := range (headerRejectionError{}).Headers() {
+						if strings.HasPrefix(name, "Anthropic-Ratelimit-") || name == "Retry-After" {
+							if recorder.Header().Get(name) != values[0] {
+								t.Errorf("missing rate-limit header %s", name)
+							}
+						} else if recorder.Header().Get(name) != "" {
+							t.Errorf("forwarded forbidden header %s", name)
+						}
+					}
+				})
+			}
+		}
+	}
 }
 
 func (*preFTKeepAliveClaudeExecutor) Identifier() string { return "pre-ft-keepalive-claude-executor" }

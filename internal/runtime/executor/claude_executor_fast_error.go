@@ -137,11 +137,13 @@ func newClaudeFastDirectResponseError(resp *http.Response, body []byte) error {
 	if resp == nil {
 		return nil
 	}
-	headers := resp.Header.Clone()
-	// body has already been decoded. Do not forward stale representation or
-	// length headers that describe the compressed upstream bytes.
-	headers.Del("Content-Encoding")
-	headers.Del("Content-Length")
+	headers := helps.ClaudeRetryHeaders(resp.Header)
+	if headers == nil {
+		headers = make(http.Header)
+	}
+	if contentType := resp.Header.Get("Content-Type"); contentType != "" {
+		headers.Set("Content-Type", contentType)
+	}
 
 	var retryAfter *time.Duration
 	credentialScoped := false

@@ -30,7 +30,10 @@ var hopByHopHeaders = map[string]struct{}{
 	"Transfer-Encoding":   {},
 	"Upgrade":             {},
 	// Security-sensitive
-	"Set-Cookie": {},
+	"Set-Cookie":    {},
+	"Cookie":        {},
+	"Authorization": {},
+	"X-Api-Key":     {},
 	// CPA-managed (set by handlers, not upstream)
 	"Content-Length":   {},
 	"Content-Encoding": {},

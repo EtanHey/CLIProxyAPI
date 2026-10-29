@@ -847,7 +847,6 @@ func TestClaudeExecutor_ErrorCarriesRetryHeaders(t *testing.T) {
 			}
 			want := http.Header{
 				"Retry-After":                           {"30"},
-				"Retry-After-Ms":                        {"30000"},
 				"Anthropic-Ratelimit-Unified-Status":    {"rejected"},
 				"Anthropic-Ratelimit-Unified-5h-Status": {"rejected"},
 			}
