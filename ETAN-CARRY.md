@@ -75,8 +75,12 @@ Rollback on the M1:
 
 ```sh
 launchctl bootout "gui/$(id -u)/com.tokenlayer.cliproxyapi"
+launchctl disable "gui/$(id -u)/com.tokenlayer.cliproxyapi"
 brew services start cliproxyapi
 ```
 
+The disable step keeps the carry from starting again at the next login.
+Homebrew's start command enables its own label before bootstrapping it.
+
 Do not leave both services listening on port 8317. To use a new carry build,
-stop the carry agent before switching its binary, then bootstrap it again.
+stop the carry agent before switching its binary, then enable and bootstrap it again.
